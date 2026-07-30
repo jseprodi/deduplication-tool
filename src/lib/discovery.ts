@@ -86,20 +86,27 @@ async function buildLoserInfo(
   refCaches: RefCaches,
   loserItem: { id: string; codename: string; name: string; type: { id?: string } }
 ): Promise<LoserInfo> {
-  const variants = await mapi.listLanguageVariantsOfItem().byItemCodename(loserItem.codename).toPromise();
-
   const languages: string[] = [];
   const workflowByLanguage: LoserInfo["workflowByLanguage"] = {};
   const slugByLanguage: LoserInfo["slugByLanguage"] = {};
 
-  for (const variant of variants.data.items) {
-    const languageCodename = refCaches.languageCodename(variant.language.id!);
-    languages.push(languageCodename);
-    workflowByLanguage[languageCodename] = {
-      workflowCodename: refCaches.workflowCodename(variant.workflow.workflowIdentifier.id!),
-      stepCodename: refCaches.stepCodename(variant.workflow.stepIdentifier.id!),
-    };
-    slugByLanguage[languageCodename] = null; // filled in lazily by planBuilder/retire using contentTypeCache
+  // A content item can exist with zero language variants (never actually
+  // authored in any language) — the API reports that as "not found" rather
+  // than an empty list. Treat it as a loser with nothing to retire, not a
+  // hard failure: it still merges cleanly, there's just no variant to move.
+  try {
+    const variants = await mapi.listLanguageVariantsOfItem().byItemCodename(loserItem.codename).toPromise();
+    for (const variant of variants.data.items) {
+      const languageCodename = refCaches.languageCodename(variant.language.id!);
+      languages.push(languageCodename);
+      workflowByLanguage[languageCodename] = {
+        workflowCodename: refCaches.workflowCodename(variant.workflow.workflowIdentifier.id!),
+        stepCodename: refCaches.stepCodename(variant.workflow.stepIdentifier.id!),
+      };
+      slugByLanguage[languageCodename] = null; // filled in lazily by planBuilder/retire using contentTypeCache
+    }
+  } catch {
+    // no variants exist for this item — nothing to retire, proceed with none.
   }
 
   return {
@@ -113,6 +120,11 @@ async function buildLoserInfo(
   };
 }
 
+export interface DiscoveryResult {
+  records: ReferencingRecord[];
+  warnings: string[];
+}
+
 /**
  * M2 — run Delivery Used-In for each loser, paginate to completion, scope by
  * content type, and aggregate into one referencing-item set keyed by
@@ -123,13 +135,26 @@ export async function discoverReferences(
   delivery: DeliveryClient,
   losers: string[],
   typeFilter: string[]
-): Promise<ReferencingRecord[]> {
+): Promise<DiscoveryResult> {
   const byKey = new Map<string, ReferencingRecord>();
+  const warnings: string[] = [];
 
   await mapWithConcurrency(losers, 4, async (loserCodename) => {
     let query = delivery.itemUsedIn(loserCodename);
     if (typeFilter.length > 0) query = query.types(typeFilter);
-    const result = await query.toAllPromise();
+
+    let result;
+    try {
+      result = await query.toAllPromise();
+    } catch {
+      // Delivery only knows about published content — a loser that has never
+      // been published 404s here rather than returning an empty list. That's
+      // a legitimate zero-references case (see M5 edge cases), not a failure.
+      warnings.push(
+        `"${loserCodename}" could not be queried for references (it may never have been published) — treated as having zero references.`
+      );
+      return;
+    }
 
     for (const item of result.data.items) {
       const key = `${item.system.codename}__${item.system.language}`;
@@ -152,5 +177,5 @@ export async function discoverReferences(
     }
   });
 
-  return Array.from(byKey.values());
+  return { records: Array.from(byKey.values()), warnings };
 }

@@ -9,6 +9,7 @@ import { buildPlan } from "./lib/planBuilder";
 import { commitPlan, verifyLoserHasNoReferences } from "./lib/commit";
 import { retireLosers } from "./lib/retire";
 import { buildChangeset, newRunId, changesetToJson, changesetToCsv } from "./lib/audit";
+import { describeError } from "./lib/errors";
 import type {
   Changeset,
   LoserRetireAudit,
@@ -52,17 +53,17 @@ export default function App() {
     setPhase("discovering");
     try {
       const resolvedSet = await resolveMergeSet(mapi, refCaches, newInput);
-      setResolved(resolvedSet);
-      const refs = await discoverReferences(
+      const discovery = await discoverReferences(
         delivery,
         resolvedSet.losers.map((l) => l.codename),
         newInput.typeFilter
       );
-      setReferencing(refs);
+      setResolved({ ...resolvedSet, warnings: [...resolvedSet.warnings, ...discovery.warnings] });
+      setReferencing(discovery.records);
       setPlan(null);
       setPhase("review");
     } catch (err) {
-      setError(err instanceof ValidationError ? err.message : `Discovery failed: ${(err as Error).message}`);
+      setError(err instanceof ValidationError ? err.message : `Discovery failed: ${describeError(err)}`);
       setPhase("define");
     }
   }
@@ -76,7 +77,7 @@ export default function App() {
       setPlan(builtPlan);
       setPhase("review");
     } catch (err) {
-      setError(`Plan build failed: ${(err as Error).message}`);
+      setError(`Plan build failed: ${describeError(err)}`);
       setPhase("review");
     }
   }
@@ -108,7 +109,7 @@ export default function App() {
       setVerification(verificationResults);
 
       setRunProgress(`Moving ${resolved.losers.length} loser(s) to the archive step…`);
-      const retires = await retireLosers(mapi, contentTypeCache, resolved.losers, config, (audit) => {
+      const retires = await retireLosers(mapi, contentTypeCache, refCaches, resolved.losers, config, (audit) => {
         setLoserRetires((prev) => [
           ...prev.filter((a) => a.loserCodename !== audit.loserCodename || a.languageCodename !== audit.languageCodename),
           audit,
@@ -128,7 +129,7 @@ export default function App() {
       setRunProgress("");
       setPhase("result");
     } catch (err) {
-      setError(`Run failed: ${(err as Error).message}`);
+      setError(`Run failed: ${describeError(err)}`);
       setRunProgress("");
       setPhase("result");
     }

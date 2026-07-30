@@ -34,8 +34,8 @@ export function ConfirmDialog({
       </p>
       {newVersionCount > 0 && (
         <p className="confirm-text warn-text">
-          {newVersionCount} of these item{newVersionCount === 1 ? "" : "s"} are currently published — updating them
-          will create a new version.
+          {newVersionCount} of these item{newVersionCount === 1 ? "" : "s"} {newVersionCount === 1 ? "is" : "are"}{" "}
+          currently published — updating {newVersionCount === 1 ? "it" : "them"} will create a new version.
         </p>
       )}
       <p className="hint">This is not reversible from within Kontent.ai directly, but this tool records everything

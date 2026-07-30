@@ -1,6 +1,7 @@
 import type { ManagementClient } from "./clients";
 import type { Changeset, VariantWriteAudit, LoserRetireAudit } from "../types";
 import { mapWithConcurrency } from "./concurrency";
+import { describeError } from "./errors";
 
 export function newRunId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -72,7 +73,7 @@ export async function undoRun(mapi: ManagementClient, changeset: Changeset, conc
           itemCodename: write.itemCodename,
           languageCodename: write.languageCodename,
           status: "failed" as const,
-          error: err instanceof Error ? err.message : String(err),
+          error: describeError(err),
         };
       }
     }
@@ -98,7 +99,7 @@ export async function undoRun(mapi: ManagementClient, changeset: Changeset, conc
           loserCodename: retire.loserCodename,
           languageCodename: retire.languageCodename,
           status: "failed" as const,
-          error: err instanceof Error ? err.message : String(err),
+          error: describeError(err),
         };
       }
     }

@@ -1,7 +1,9 @@
 import type { ManagementClient } from "./clients";
 import type { ContentTypeCache } from "./contentTypeCache";
+import type { RefCaches } from "./refCaches";
 import type { AppConfig, LoserInfo, LoserRetireAudit } from "../types";
 import { mapWithConcurrency } from "./concurrency";
+import { describeError } from "./errors";
 
 interface LoserLanguageTask {
   loser: LoserInfo;
@@ -39,6 +41,7 @@ async function readSlug(
 export async function retireLosers(
   mapi: ManagementClient,
   contentTypeCache: ContentTypeCache,
+  refCaches: RefCaches,
   losers: LoserInfo[],
   config: AppConfig,
   onProgress?: (audit: LoserRetireAudit) => void,
@@ -62,6 +65,20 @@ export async function retireLosers(
     };
 
     try {
+      // A published variant can't be archived directly — the API rejects it
+      // with "Cannot archive the specified variant because one of its previous
+      // versions is published" (code 4040033) even after Create New Version,
+      // since that still leaves a published version behind. It has to be
+      // unpublished first.
+      if (priorWorkflow && refCaches.isPublishedStep(priorWorkflow.workflowCodename, priorWorkflow.stepCodename)) {
+        await mapi
+          .unpublishLanguageVariant()
+          .byItemCodename(loser.codename)
+          .byLanguageCodename(languageCodename)
+          .withoutData()
+          .toPromise();
+      }
+
       await mapi
         .changeWorkflowOfLanguageVariant()
         .byItemCodename(loser.codename)
@@ -74,7 +91,7 @@ export async function retireLosers(
       audit.status = "success";
     } catch (err) {
       audit.status = "failed";
-      audit.error = err instanceof Error ? err.message : String(err);
+      audit.error = describeError(err);
     }
 
     onProgress?.(audit);

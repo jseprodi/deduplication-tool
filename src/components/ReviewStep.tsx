@@ -90,8 +90,12 @@ export function ReviewStep({
       </div>
 
       {!plan && (
-        <button className="primary" disabled={isBuildingPlan || referencing.length === 0} onClick={onBuildPlan}>
-          {isBuildingPlan ? "Building plan…" : "Build plan"}
+        <button className="primary" disabled={isBuildingPlan} onClick={onBuildPlan}>
+          {isBuildingPlan
+            ? "Building plan…"
+            : referencing.length === 0
+              ? "Continue (no references found)"
+              : "Build plan"}
         </button>
       )}
 
@@ -143,9 +147,15 @@ export function ReviewStep({
             </table>
           </div>
 
-          <button className="primary" disabled={affectedItems === 0} onClick={onConfirm}>
+          <button className="primary" onClick={onConfirm}>
             Confirm &amp; run
           </button>
+          {affectedItems === 0 && (
+            <p className="hint">
+              No reference swaps needed (already up to date, or no losers had references) — confirming will still
+              retire the loser(s) to the archive step.
+            </p>
+          )}
         </>
       )}
 

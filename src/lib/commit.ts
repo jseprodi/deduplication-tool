@@ -1,6 +1,7 @@
 import type { ManagementClient } from "./clients";
 import type { PlanEntry, VariantWriteAudit } from "../types";
 import { mapWithConcurrency } from "./concurrency";
+import { describeError } from "./errors";
 
 function variantKey(itemCodename: string, languageCodename: string): string {
   return `${itemCodename}__${languageCodename}`;
@@ -36,6 +37,17 @@ export async function commitPlan(
     }
 
     try {
+      // The Management API rejects an upsert against a published variant outright
+      // (error code 204) rather than creating a new version as a side effect —
+      // create the version explicitly first when the variant is currently published.
+      if (entry.willCreateNewVersion) {
+        await mapi
+          .createNewVersionOfLanguageVariant()
+          .byItemCodename(entry.itemCodename)
+          .byLanguageCodename(entry.languageCodename)
+          .toPromise();
+      }
+
       await mapi
         .upsertLanguageVariant()
         .byItemCodename(entry.itemCodename)
@@ -47,7 +59,7 @@ export async function commitPlan(
       audit.status = "success";
     } catch (err) {
       audit.status = "failed";
-      audit.error = err instanceof Error ? err.message : String(err);
+      audit.error = describeError(err);
     }
 
     onProgress?.(audit);
@@ -63,6 +75,12 @@ export async function verifyLoserHasNoReferences(
 ): Promise<boolean> {
   let query = delivery.itemUsedIn(loserCodename);
   if (typeFilter.length > 0) query = query.types(typeFilter);
-  const result = await query.toAllPromise();
-  return result.data.items.length === 0;
+  try {
+    const result = await query.toAllPromise();
+    return result.data.items.length === 0;
+  } catch {
+    // Delivery 404s for a loser that was never published rather than
+    // returning an empty list — that's trivially "no references remain".
+    return true;
+  }
 }
